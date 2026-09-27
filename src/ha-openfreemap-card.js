@@ -1,10 +1,27 @@
 import * as maplibregl from "maplibre-gl";
 import sdkCss from "maplibre-gl/dist/maplibre-gl.css";
+import "./editor.js";
 
-const CARD_VERSION = "0.1.0";
+const CARD_VERSION = "0.2.0";
 const DEFAULT_CENTER = [0, 0];
 const DEFAULT_ZOOM = 2;
-const DEFAULT_STYLE = "https://tiles.openfreemap.org/styles/liberty";
+const DEFAULT_STYLE = "auto";
+const STYLE_BASE = "https://tiles.openfreemap.org/styles/";
+const STYLE_NAMES = new Set(["liberty", "bright", "positron", "dark", "fiord"]);
+function resolveStyle(style) {
+  if (STYLE_NAMES.has(style)) return STYLE_BASE + style;
+  try {
+    const url = new URL(style);
+    if (["http:", "https:"].includes(url.protocol)) return url.href;
+  } catch { /* handled below */ }
+  throw new Error("style must be an OpenFreeMap style name or an HTTP(S) style URL");
+}
+function activeStyle(config, hass) {
+  const choice = config.style === "auto"
+    ? (hass?.themes?.darkMode ? config.dark_style : config.light_style)
+    : config.style;
+  return resolveStyle(choice);
+}
 maplibregl.setWorkerUrl(new URL("./maplibre-gl-worker.mjs", import.meta.url).href);
 
 function coordinates(attributes) {
@@ -58,20 +75,29 @@ class HaOpenFreeMapCard extends HTMLElement {
     this._zones = new Map();
   }
 
+  static getConfigElement() { return document.createElement("ha-openfreemap-card-editor"); }
+
   static getStubConfig() {
-    return { type: "custom:ha-openfreemap-card", entities: [], title: "Map", show_zones: false };
+    return { entities: [], title: "Map", style: "auto", show_zones: false };
   }
 
   setConfig(config) {
     if (!Array.isArray(config.entities)) throw new Error("OpenFreeMap Card requires an entities array");
     this._config = {
-      title: "", height: "400px", style: DEFAULT_STYLE, center: DEFAULT_CENTER,
+      title: "", height: "400px", style: DEFAULT_STYLE, light_style: "liberty", dark_style: "dark", compact_attribution: true, center: DEFAULT_CENTER,
       zoom: DEFAULT_ZOOM, fit_bounds: true, show_zones: false, zones: [], ...config
     };
     const height = this._config.height;
     if (!(typeof height === "number" && height >= 100) && !(typeof height === "string" && /^\d+(px|vh|rem|em|%)$/.test(height))) {
       throw new Error("height must be a number (pixels) or a CSS length such as 400px");
     }
+    const zoom = Number(this._config.zoom);
+    const center = this._config.center;
+    if (!Number.isFinite(zoom) || zoom < 0 || zoom > 22) throw new Error("zoom must be between 0 and 22");
+    if (!Array.isArray(center) || center.length !== 2 || !Number.isFinite(Number(center[0])) ||
+        !Number.isFinite(Number(center[1])) || Math.abs(Number(center[0])) > 180 ||
+        Math.abs(Number(center[1])) > 90) throw new Error("center must be [longitude, latitude]");
+    activeStyle(this._config, this._hass);
     this._renderShell();
     this._destroyMap();
     if (this.isConnected) this._initMap();
@@ -117,12 +143,19 @@ class HaOpenFreeMapCard extends HTMLElement {
     const center = Array.isArray(this._config.center) && this._config.center.length === 2
       ? this._config.center.map(Number) : DEFAULT_CENTER;
     try {
+      this._activeStyle = activeStyle(this._config, this._hass);
       this._map = new maplibregl.Map({
         container: this.shadowRoot.querySelector("#map"),
-        style: this._config.style, center, zoom: Number(this._config.zoom) || DEFAULT_ZOOM
+        style: this._activeStyle, center, zoom: Number(this._config.zoom), attributionControl: { compact: this._config.compact_attribution }
       });
       this._map.on("error", (event) => this._showError(event.error?.message || "Map failed to load"));
-      this._map.on("load", () => this._sync());
+      this._map.on("load", () => {
+        this._sync();
+        if (this._config.compact_attribution) {
+          this.shadowRoot.querySelector(".maplibregl-ctrl-attrib.maplibregl-compact")
+            ?.classList.remove("maplibregl-compact-show");
+        }
+      });
       this._sync();
     } catch (error) { this._showError(error.message); }
   }
@@ -134,6 +167,11 @@ class HaOpenFreeMapCard extends HTMLElement {
 
   _sync() {
     if (!this._map || !this._hass || !this._config) return;
+    const nextStyle = activeStyle(this._config, this._hass);
+    if (nextStyle !== this._activeStyle) {
+      this._activeStyle = nextStyle;
+      this._map.setStyle(nextStyle);
+    }
     const bounds = new maplibregl.LngLatBounds();
     const seen = new Set();
     for (const entry of this._config.entities) {
@@ -158,8 +196,8 @@ class HaOpenFreeMapCard extends HTMLElement {
     if (this._config.fit_bounds && signature !== this._boundsSignature) {
       this._boundsSignature = signature;
       if (seen.size > 1) this._map.fitBounds(bounds, { padding: 45, maxZoom: 15, duration: 350 });
-      else if (seen.size === 1) this._map.easeTo({ center: bounds.getCenter(), zoom: Math.min(Number(this._config.zoom) || 13, 15), duration: 350 });
-      else this._map.easeTo({ center: this._config.center, zoom: Number(this._config.zoom) || DEFAULT_ZOOM, duration: 350 });
+      else if (seen.size === 1) this._map.easeTo({ center: bounds.getCenter(), zoom: Math.min(Number(this._config.zoom), 15), duration: 350 });
+      else this._map.easeTo({ center: this._config.center, zoom: Number(this._config.zoom), duration: 350 });
     }
   }
 
@@ -188,7 +226,7 @@ class HaOpenFreeMapCard extends HTMLElement {
     for (const item of this._markers.values()) item.marker.remove();
     for (const item of this._zones.values()) item.marker.remove();
     this._markers.clear(); this._zones.clear();
-    this._map?.remove(); this._map = null; this._boundsSignature = null;
+    this._map?.remove(); this._map = null; this._boundsSignature = null; this._activeStyle = null;
   }
 }
 

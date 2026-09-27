@@ -15,6 +15,8 @@ For manual installation, copy **all three files** from `dist/` to `<config>/www/
 
 ## Configure
 
+Add the card in the dashboard editor to use its graphical settings for entities, styles, center, zoom, attribution, and zones. YAML configuration remains available:
+
 ```yaml
 type: custom:ha-openfreemap-card
 title: Family map
@@ -25,9 +27,12 @@ entities:
 center: [103.8198, 1.3521] # longitude, latitude
 zoom: 10
 fit_bounds: true
+style: auto # follows the active Home Assistant light/dark theme
+light_style: liberty
+dark_style: dark
+compact_attribution: true
 show_zones: true
 # zones: [zone.home, zone.office]
-# style: https://tiles.openfreemap.org/styles/positron
 ```
 
 | Option | Default | Description |
@@ -35,20 +40,23 @@ show_zones: true
 | `entities` | required array | Entity IDs with latitude and longitude attributes |
 | `title` | empty | Card heading |
 | `height` | `400px` | Pixel number or CSS length |
-| `style` | [OpenFreeMap Liberty](https://tiles.openfreemap.org/styles/liberty) | MapLibre style URL |
+| `style` | `auto` | `auto`, OpenFreeMap style name, or MapLibre style URL |
+| `light_style` | `liberty` | Style used when HA is in light mode and `style: auto` |
+| `dark_style` | `dark` | Style used when HA is in dark mode and `style: auto` |
+| `compact_attribution` | `true` | Compact expandable map attribution |
 | `center` | `[0, 0]` | Fallback longitude, latitude |
 | `zoom` | `2` | Fallback zoom, also used for one marker |
 | `fit_bounds` | `true` | Reframe when tracked positions change |
 | `show_zones` | `false` | Display Home Assistant zone markers |
 | `zones` | all zones | Limit zones to these entity IDs |
 
-Other OpenFreeMap styles include `bright`, `positron`, and `dark`; use URLs such as `https://tiles.openfreemap.org/styles/dark`. You can also use another MapLibre-compatible style URL from a provider of your choice.
+OpenFreeMap style names are `liberty`, `bright`, `positron`, `dark`, and `fiord`. A full HTTP(S) URL to another MapLibre-compatible style also works. With `style: auto`, the card follows `hass.themes.darkMode` and switches live. The attribution control stays available and expands when clicked. When `fit_bounds: true`, center and zoom are fallbacks; disable it to keep your chosen initial view.
 
 Markers follow Home Assistant state updates. An entity's `entity_picture` is shown when available; otherwise its icon is used. Clicking a marker shows the entity name and state. Entities without valid coordinates are skipped. Zone markers do not affect automatic bounds.
 
 ## Service and privacy notes
 
-OpenFreeMap currently offers its public instance without API keys or stated request limits. It is provided as-is without an availability guarantee. Keep its attribution visible. Basemap requests go to OpenFreeMap, so the provider receives the viewed map area and normal request metadata; individual entity state and names stay in Home Assistant and are not sent by this card to OpenFreeMap. For a fully self-hosted basemap, provide your own MapLibre style and tile sources.
+OpenFreeMap currently offers its public instance without API keys or stated request limits. It is provided as-is without an availability guarantee. Keep the attribution control available; click it to read the full credits. Basemap requests go to OpenFreeMap, so the provider receives the viewed map area and normal request metadata; individual entity state and names stay in Home Assistant and are not sent by this card to OpenFreeMap. For a fully self-hosted basemap, provide your own MapLibre style and tile sources.
 
 MapLibre GL JS v6 requires WebGL2, so older tablets or browsers without WebGL2 may not display the map. Home Assistant 2024.12 or newer is the intended compatibility baseline.
 
