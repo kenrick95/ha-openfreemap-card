@@ -11,6 +11,7 @@ class HaOpenFreeMapCardEditor extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
+    this._pickerCount = 0;
   }
 
   setConfig(config) {
@@ -22,7 +23,6 @@ class HaOpenFreeMapCardEditor extends HTMLElement {
     const first = !this._hass;
     this._hass = value;
     if (first && this._config) this._render();
-    else this.shadowRoot.querySelectorAll("ha-entity-picker").forEach((picker) => { picker.hass = value; });
   }
 
   _emit(patch) {
@@ -53,36 +53,109 @@ class HaOpenFreeMapCardEditor extends HTMLElement {
   }
 
   _entityPicker(value, excluded, onChange, label) {
-    if (customElements.get("ha-entity-picker")) {
-      const picker = document.createElement("ha-entity-picker");
-      picker.hass = this._hass;
-      picker.value = value;
-      picker.label = label;
-      picker.excludeEntities = excluded;
-      picker.addEventListener("value-changed", (event) => {
-        event.stopPropagation();
-        if (event.detail?.value) onChange(event.detail.value);
+    const wrapper = document.createElement("div");
+    wrapper.className = "entity-combobox";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = value || "";
+    input.placeholder = label;
+    input.autocomplete = "off";
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-label", label);
+    input.setAttribute("aria-autocomplete", "list");
+    input.setAttribute("aria-expanded", "false");
+    const menu = document.createElement("div");
+    menu.className = "entity-options";
+    menu.id = `entity-options-${++this._pickerCount}`;
+    menu.setAttribute("role", "listbox");
+    menu.hidden = true;
+    input.setAttribute("aria-controls", menu.id);
+    wrapper.append(input, menu);
+    let matches = [];
+    let active = 0;
+    let query = "";
+
+    const choices = () => {
+      const states = this._hass?.states || {};
+      const ids = new Set([...Object.keys(states), ...(value ? [value] : [])]);
+      return [...ids].filter((id) => !excluded.includes(id)).map((id) => {
+        const attributes = states[id]?.attributes;
+        const latitude = attributes?.latitude;
+        const longitude = attributes?.longitude;
+        const location = latitude != null && longitude != null && latitude !== "" && longitude !== "" &&
+          Number.isFinite(Number(latitude)) && Math.abs(Number(latitude)) <= 90 &&
+          Number.isFinite(Number(longitude)) && Math.abs(Number(longitude)) <= 180;
+        return { id, name: String(attributes?.friendly_name || id), location };
+      }).sort((a, b) => Number(b.location) - Number(a.location) ||
+        a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    };
+    const close = () => {
+      input.value = value || "";
+      menu.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      input.removeAttribute("aria-activedescendant");
+    };
+    const choose = (id) => { close(); onChange(id); };
+    const show = () => {
+      matches = choices().filter(({ id, name }) =>
+        id.toLowerCase().includes(query) || name.toLowerCase().includes(query)).slice(0, 60);
+      active = Math.min(active, Math.max(matches.length - 1, 0));
+      menu.replaceChildren();
+      if (!matches.length) {
+        const empty = document.createElement("div");
+        empty.className = "entity-empty";
+        empty.textContent = "No matching entities";
+        menu.appendChild(empty);
+      }
+      matches.forEach(({ id, name, location }, index) => {
+        const option = document.createElement("button");
+        option.type = "button";
+        option.id = `${menu.id}-${index}`;
+        option.className = "entity-option";
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", String(index === active));
+        option.tabIndex = -1;
+        const title = document.createElement("span");
+        title.textContent = name;
+        const detail = document.createElement("small");
+        detail.textContent = id;
+        option.append(title, detail);
+        if (location) {
+          const badge = document.createElement("small");
+          badge.className = "location-badge";
+          badge.textContent = "Location";
+          option.appendChild(badge);
+        }
+        option.addEventListener("pointerdown", (event) => event.preventDefault());
+        option.addEventListener("click", () => choose(id));
+        menu.appendChild(option);
       });
-      return picker;
-    }
-    const picker = document.createElement("select");
-    picker.setAttribute("aria-label", label);
-    const empty = document.createElement("option");
-    empty.value = "";
-    empty.textContent = label;
-    picker.appendChild(empty);
-    const ids = new Set([...Object.keys(this._hass?.states || {}), ...(value ? [value] : [])]);
-    for (const id of [...ids].sort()) {
-      if (excluded.includes(id)) continue;
-      const option = document.createElement("option");
-      option.value = id;
-      const name = this._hass?.states?.[id]?.attributes?.friendly_name;
-      option.textContent = name && name !== id ? name + " (" + id + ")" : id;
-      picker.appendChild(option);
-    }
-    picker.value = value || "";
-    picker.addEventListener("change", () => { if (picker.value) onChange(picker.value); });
-    return picker;
+      menu.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+      if (matches.length) input.setAttribute("aria-activedescendant", `${menu.id}-${active}`);
+      else input.removeAttribute("aria-activedescendant");
+    };
+    input.addEventListener("focus", () => { query = ""; active = 0; input.select(); show(); });
+    input.addEventListener("input", () => { query = input.value.trim().toLowerCase(); active = 0; show(); });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { close(); return; }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if (menu.hidden) show();
+        else if (matches.length) {
+          active = (active + (event.key === "ArrowDown" ? 1 : -1) + matches.length) % matches.length;
+          show();
+          menu.querySelector(`#${menu.id}-${active}`)?.scrollIntoView({ block: "nearest" });
+        }
+      } else if (event.key === "Enter" && !menu.hidden && matches.length) {
+        event.preventDefault();
+        choose(matches[active].id);
+      }
+    });
+    wrapper.addEventListener("focusout", (event) => {
+      if (!wrapper.contains(event.relatedTarget)) close();
+    });
+    return wrapper;
   }
 
   _entities() {
@@ -92,7 +165,7 @@ class HaOpenFreeMapCardEditor extends HTMLElement {
     label.className = "label";
     label.textContent = "Entities";
     const hint = document.createElement("small");
-    hint.textContent = "Choose entities with latitude and longitude attributes.";
+    hint.textContent = "Search by name or ID. Entities with coordinates appear first; all entities remain available.";
     const list = document.createElement("div");
     list.className = "entity-list";
     const entries = this._config.entities || [];
@@ -245,6 +318,14 @@ class HaOpenFreeMapCardEditor extends HTMLElement {
       ".entity-item{display:flex;align-items:center;gap:6px;padding:8px;border:1px solid var(--divider-color,#aaa);border-radius:6px}",
       ".entity-meta{display:grid;gap:2px;min-width:0;flex:1;overflow-wrap:anywhere}",
       ".entity-picker{flex:1;min-width:0}",
+      ".entity-combobox{position:relative}",
+      ".entity-options{position:absolute;z-index:10;top:100%;left:0;right:0;max-height:260px;overflow:auto;background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#aaa);border-radius:6px;box-shadow:0 5px 16px #0003}",
+      ".entity-options[hidden]{display:none}",
+      ".entity-option{display:grid;grid-template-columns:1fr auto;gap:2px 8px;width:100%;text-align:left;border:0;border-radius:0;box-shadow:none}",
+      ".entity-option small{grid-column:1;overflow-wrap:anywhere}",
+      ".entity-option .location-badge{grid-column:2;grid-row:1 / 3;align-self:center}",
+      ".entity-option[aria-selected=true]{background:var(--secondary-background-color,#eee)}",
+      ".entity-empty{padding:10px;color:var(--secondary-text-color)}",
       "button{padding:6px 8px;border:1px solid var(--divider-color,#aaa);border-radius:5px;background:var(--card-background-color,#fff);color:var(--primary-text-color,#222);cursor:pointer}",
       "button:hover{background:var(--secondary-background-color,#eee)}"
     ].join("");

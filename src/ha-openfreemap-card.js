@@ -2,7 +2,7 @@ import * as maplibregl from "maplibre-gl";
 import sdkCss from "maplibre-gl/dist/maplibre-gl.css";
 import "./editor.js";
 
-const CARD_VERSION = "0.3.0";
+const CARD_VERSION = "0.4.0";
 const DEFAULT_CENTER = [0, 0];
 const DEFAULT_ZOOM = 2;
 const DEFAULT_STYLE = "auto";

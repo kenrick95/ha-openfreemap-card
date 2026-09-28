@@ -15,7 +15,7 @@ For manual installation, copy **all three files** from `dist/` to `<config>/www/
 
 ## Configure
 
-Add the card in the dashboard editor to use its graphical settings. Choose an entity from the dropdown, then edit or delete it from the selected list. The editor also offers styles, center, zoom, attribution, and zones. YAML configuration remains available:
+Add the card in the dashboard editor to use its graphical settings. Search entities by name or ID in the dropdown, then edit or delete them from the selected list. Entities with valid latitude and longitude appear first, and all other entities remain searchable. The editor also offers styles, center, zoom, attribution, and zones. YAML configuration remains available:
 
 ```yaml
 type: custom:ha-openfreemap-card
