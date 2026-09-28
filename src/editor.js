@@ -18,6 +18,13 @@ class HaOpenFreeMapCardEditor extends HTMLElement {
     this._render();
   }
 
+  set hass(value) {
+    const first = !this._hass;
+    this._hass = value;
+    if (first && this._config) this._render();
+    else this.shadowRoot.querySelectorAll("ha-entity-picker").forEach((picker) => { picker.hass = value; });
+  }
+
   _emit(patch) {
     this._config = { ...this._config, ...patch };
     this.dispatchEvent(new CustomEvent("config-changed", {
@@ -39,6 +46,112 @@ class HaOpenFreeMapCardEditor extends HTMLElement {
     }
     this.shadowRoot.querySelector(".fields").appendChild(row);
     return row;
+  }
+
+  _entityId(entry) {
+    return typeof entry === "string" ? entry : entry?.entity;
+  }
+
+  _entityPicker(value, excluded, onChange, label) {
+    if (customElements.get("ha-entity-picker")) {
+      const picker = document.createElement("ha-entity-picker");
+      picker.hass = this._hass;
+      picker.value = value;
+      picker.label = label;
+      picker.excludeEntities = excluded;
+      picker.addEventListener("value-changed", (event) => {
+        event.stopPropagation();
+        if (event.detail?.value) onChange(event.detail.value);
+      });
+      return picker;
+    }
+    const picker = document.createElement("select");
+    picker.setAttribute("aria-label", label);
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = label;
+    picker.appendChild(empty);
+    const ids = new Set([...Object.keys(this._hass?.states || {}), ...(value ? [value] : [])]);
+    for (const id of [...ids].sort()) {
+      if (excluded.includes(id)) continue;
+      const option = document.createElement("option");
+      option.value = id;
+      const name = this._hass?.states?.[id]?.attributes?.friendly_name;
+      option.textContent = name && name !== id ? name + " (" + id + ")" : id;
+      picker.appendChild(option);
+    }
+    picker.value = value || "";
+    picker.addEventListener("change", () => { if (picker.value) onChange(picker.value); });
+    return picker;
+  }
+
+  _entities() {
+    const section = document.createElement("section");
+    section.className = "entity-section";
+    const label = document.createElement("span");
+    label.className = "label";
+    label.textContent = "Entities";
+    const hint = document.createElement("small");
+    hint.textContent = "Choose entities with latitude and longitude attributes.";
+    const list = document.createElement("div");
+    list.className = "entity-list";
+    const entries = this._config.entities || [];
+    const ids = entries.map((entry) => this._entityId(entry));
+    entries.forEach((entry, index) => {
+      const id = this._entityId(entry);
+      const item = document.createElement("div");
+      item.className = "entity-item";
+      if (this._editingIndex === index) {
+        const picker = this._entityPicker(id, ids.filter((_, other) => other !== index), (next) => {
+          const updated = [...this._config.entities];
+          updated[index] = typeof entry === "string" ? next : { ...entry, entity: next };
+          this._editingIndex = undefined;
+          this._emit({ entities: updated });
+          this._render();
+        }, "Change entity");
+        picker.classList.add("entity-picker");
+        item.appendChild(picker);
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.textContent = "Cancel";
+        cancel.addEventListener("click", () => { this._editingIndex = undefined; this._render(); });
+        item.appendChild(cancel);
+      } else {
+        const meta = document.createElement("div");
+        meta.className = "entity-meta";
+        const name = document.createElement("span");
+        name.textContent = this._hass?.states?.[id]?.attributes?.friendly_name || id;
+        const entityId = document.createElement("small");
+        entityId.textContent = id;
+        meta.append(name, entityId);
+        item.appendChild(meta);
+        const edit = document.createElement("button");
+        edit.type = "button";
+        edit.textContent = "Edit";
+        edit.setAttribute("aria-label", "Edit " + id);
+        edit.addEventListener("click", () => { this._editingIndex = index; this._render(); });
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "Delete";
+        remove.setAttribute("aria-label", "Delete " + id);
+        remove.addEventListener("click", () => {
+          const updated = [...this._config.entities];
+          updated.splice(index, 1);
+          this._editingIndex = undefined;
+          this._emit({ entities: updated });
+          this._render();
+        });
+        item.append(edit, remove);
+      }
+      list.appendChild(item);
+    });
+    const add = this._entityPicker(undefined, ids, (id) => {
+      this._emit({ entities: [...entries, id] });
+      this._render();
+    }, "Add entity");
+    add.classList.add("entity-picker");
+    section.append(label, hint, list, add);
+    this.shadowRoot.querySelector(".fields").appendChild(section);
   }
 
   _text(label, key, value, description, multiline = false) {
@@ -126,16 +239,21 @@ class HaOpenFreeMapCardEditor extends HTMLElement {
       "input:not([type=checkbox]),select,textarea{box-sizing:border-box;width:100%;padding:9px;border:1px solid var(--divider-color,#aaa);border-radius:6px;background:var(--card-background-color,#fff);color:var(--primary-text-color,#222);font:inherit}",
       "textarea{resize:vertical}",
       ".check{grid-template-columns:auto 1fr;align-items:center;column-gap:10px}",
-      ".check small{grid-column:2}"
+      ".check small{grid-column:2}",
+      ".entity-section{display:grid;gap:7px}",
+      ".entity-list{display:grid;gap:6px}",
+      ".entity-item{display:flex;align-items:center;gap:6px;padding:8px;border:1px solid var(--divider-color,#aaa);border-radius:6px}",
+      ".entity-meta{display:grid;gap:2px;min-width:0;flex:1;overflow-wrap:anywhere}",
+      ".entity-picker{flex:1;min-width:0}",
+      "button{padding:6px 8px;border:1px solid var(--divider-color,#aaa);border-radius:5px;background:var(--card-background-color,#fff);color:var(--primary-text-color,#222);cursor:pointer}",
+      "button:hover{background:var(--secondary-background-color,#eee)}"
     ].join("");
     const fields = document.createElement("div");
     fields.className = "fields";
     this.shadowRoot.append(style, fields);
 
     const config = this._config;
-    this._text("Entities", "entities",
-      (config.entities || []).map((item) => typeof item === "string" ? item : item.entity).join("\n"),
-      "One entity ID per line; each needs latitude and longitude.", true);
+    this._entities();
     this._text("Title", "title", config.title || "");
     this._text("Height", "height", config.height || "400px", "For example: 400px or 50vh");
     this._style("Map style", "style", config.style || "auto", true);

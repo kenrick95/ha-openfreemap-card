@@ -2,7 +2,7 @@ import * as maplibregl from "maplibre-gl";
 import sdkCss from "maplibre-gl/dist/maplibre-gl.css";
 import "./editor.js";
 
-const CARD_VERSION = "0.2.0";
+const CARD_VERSION = "0.3.0";
 const DEFAULT_CENTER = [0, 0];
 const DEFAULT_ZOOM = 2;
 const DEFAULT_STYLE = "auto";
@@ -105,6 +105,7 @@ class HaOpenFreeMapCard extends HTMLElement {
 
   set hass(value) {
     this._hass = value;
+    if (this.isConnected && this._config && !this._map) this._initMap();
     this._sync();
   }
 
@@ -128,6 +129,7 @@ class HaOpenFreeMapCard extends HTMLElement {
         .ha-openfreemap-popup { color:#222; display:grid; gap:3px; min-width:110px; }
         .ha-openfreemap-popup span { overflow-wrap:anywhere; }
         .ha-openfreemap-zone { width:15px; height:15px; border-radius:50%; background:#4285f4; border:2px solid white; box-shadow:0 0 0 2px #4285f4; }
+        .maplibregl-ctrl-attrib, .maplibregl-ctrl-attrib * { transition:none !important; }
       </style>
       <ha-card style="--map-height:${height}">
         ${this._config.title ? '<div class="title"></div>' : ""}
@@ -138,24 +140,52 @@ class HaOpenFreeMapCard extends HTMLElement {
     if (title) title.textContent = this._config.title;
   }
 
+  _initialView() {
+    const seen = new Set();
+    const points = [];
+    for (const entry of this._config.entities) {
+      const id = typeof entry === "string" ? entry : entry?.entity;
+      if (seen.has(id)) continue;
+      const point = coordinates(this._hass.states[id]?.attributes);
+      if (point) { seen.add(id); points.push(point); }
+    }
+    if (!this._config.fit_bounds) {
+      return { options: { center: this._config.center, zoom: Number(this._config.zoom) }, signature: null };
+    }
+    const signature = JSON.stringify(points);
+    if (points.length > 1) {
+      const bounds = new maplibregl.LngLatBounds();
+      points.forEach((point) => bounds.extend(point));
+      return { options: { bounds, fitBoundsOptions: { padding: 45, maxZoom: 15, duration: 0 } }, signature };
+    }
+    if (points.length === 1) {
+      return { options: { center: points[0], zoom: Math.min(Number(this._config.zoom), 15) }, signature };
+    }
+    return { options: { center: this._config.center, zoom: Number(this._config.zoom) }, signature };
+  }
+
+  _collapseAttribution() {
+    if (this._config.compact_attribution) {
+      this.shadowRoot.querySelector(".maplibregl-ctrl-attrib.maplibregl-compact")
+        ?.classList.remove("maplibregl-compact-show");
+    }
+  }
+
   _initMap() {
-    if (this._map || !this.shadowRoot.querySelector("#map")) return;
-    const center = Array.isArray(this._config.center) && this._config.center.length === 2
-      ? this._config.center.map(Number) : DEFAULT_CENTER;
+    if (this._map || !this._hass || !this.shadowRoot.querySelector("#map")) return;
     try {
+      const view = this._initialView();
+      this._boundsSignature = view.signature;
       this._activeStyle = activeStyle(this._config, this._hass);
       this._map = new maplibregl.Map({
         container: this.shadowRoot.querySelector("#map"),
-        style: this._activeStyle, center, zoom: Number(this._config.zoom), attributionControl: { compact: this._config.compact_attribution }
+        style: this._activeStyle, ...view.options, fadeDuration: 0,
+        attributionControl: { compact: this._config.compact_attribution }
       });
       this._map.on("error", (event) => this._showError(event.error?.message || "Map failed to load"));
-      this._map.on("load", () => {
-        this._sync();
-        if (this._config.compact_attribution) {
-          this.shadowRoot.querySelector(".maplibregl-ctrl-attrib.maplibregl-compact")
-            ?.classList.remove("maplibregl-compact-show");
-        }
-      });
+      this._collapseAttribution();
+      this._map.on("styledata", () => this._collapseAttribution());
+      this._map.on("load", () => { this._collapseAttribution(); this._sync(); });
       this._sync();
     } catch (error) { this._showError(error.message); }
   }

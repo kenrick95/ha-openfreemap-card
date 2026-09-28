@@ -15,7 +15,7 @@ For manual installation, copy **all three files** from `dist/` to `<config>/www/
 
 ## Configure
 
-Add the card in the dashboard editor to use its graphical settings for entities, styles, center, zoom, attribution, and zones. YAML configuration remains available:
+Add the card in the dashboard editor to use its graphical settings. Choose an entity from the dropdown, then edit or delete it from the selected list. The editor also offers styles, center, zoom, attribution, and zones. YAML configuration remains available:
 
 ```yaml
 type: custom:ha-openfreemap-card
@@ -52,7 +52,7 @@ show_zones: true
 
 OpenFreeMap style names are `liberty`, `bright`, `positron`, `dark`, and `fiord`. A full HTTP(S) URL to another MapLibre-compatible style also works. With `style: auto`, the card follows `hass.themes.darkMode` and switches live. The attribution control stays available and expands when clicked. When `fit_bounds: true`, center and zoom are fallbacks; disable it to keep your chosen initial view.
 
-Markers follow Home Assistant state updates. An entity's `entity_picture` is shown when available; otherwise its icon is used. Clicking a marker shows the entity name and state. Entities without valid coordinates are skipped. Zone markers do not affect automatic bounds.
+Markers follow Home Assistant state updates. An entity's `entity_picture` is shown when available; otherwise its icon is used. Clicking a marker shows the entity name and state. Entities without valid coordinates are skipped. Zone markers do not affect automatic bounds. On card load, the map starts at the calculated entity bounds without a camera animation; later position updates still reframe smoothly.
 
 ## Service and privacy notes
 
